@@ -88,6 +88,6 @@ contract ConvertERC721toDN404 is DN404 {
 
     // Override receive to enable contract to receive ether
     receive() external payable override {
-        // Optional: 여기에 이더를 받았을 때 수행할 로직을 추가할 수 있습니다.
+        // Optional: 여기에 클레이를 받았을 때 수행할 로직을 추가할 수 있습니다.
     }
 }
