@@ -5,7 +5,7 @@ import "./DN404.sol";
 import "./DN404Mirror.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
-import "solady/src/utils/LibBitmap.sol"; // Assume this path is correct
+import "solady/src/utils/LibBitmap.sol";
 
 contract ConvertERC721toDN404 is DN404 {
     using LibBitmap for LibBitmap.Bitmap;
