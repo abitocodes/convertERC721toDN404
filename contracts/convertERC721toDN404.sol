@@ -4,20 +4,17 @@ pragma solidity ^0.8.4;
 import "./DN404.sol";
 import "./DN404Mirror.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol"; // ERC721 메타데이터 인터페이스 추가
+import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
+import "solady/src/utils/LibBitmap.sol"; // Assume this path is correct
 
-/**
- * @title ConvertERC721toDN404
- * @dev This contract allows locking ERC721 tokens to mint DN404 tokens and vice versa.
- * The DN404 tokens minted will have a 1:1 relationship with the ERC721 tokens locked,
- * and their token IDs will match.
- */
 contract ConvertERC721toDN404 is DN404 {
-    IERC721 public immutable nftToken; // The ERC721 token contract
-    IERC721Metadata public immutable nftMetadata; // ERC721 메타데이터 인터페이스 추가
-    DN404Mirror public immutable dn404Mirror; // DN404Mirror 컨트랙트 인스턴스
+    using LibBitmap for LibBitmap.Bitmap;
 
-    mapping(uint256 => bool) private _isTokenLocked; // Mapping to track locked ERC721 tokens
+    IERC721 public immutable nftToken; 
+    IERC721Metadata public immutable nftMetadata; 
+    DN404Mirror public immutable dn404Mirror;
+
+    LibBitmap.Bitmap private _isTokenLockedBitmap; // Using LibBitmap for tracking locked tokens
 
     event TokenLocked(address indexed owner, uint256 indexed tokenId);
     event TokenUnlocked(address indexed receiver, uint256 indexed tokenId);
@@ -26,68 +23,70 @@ contract ConvertERC721toDN404 is DN404 {
         require(_nftTokenAddress != address(0), "NFT token address cannot be the zero address");
 
         nftToken = IERC721(_nftTokenAddress);
-        nftMetadata = IERC721Metadata(_nftTokenAddress); // ERC721 메타데이터 인터페이스 초기화
+        nftMetadata = IERC721Metadata(_nftTokenAddress);
 
-        // DN404Mirror 컨트랙트 인스턴스를 생성하고 주소를 저장
         DN404Mirror mirrorInstance = new DN404Mirror(msg.sender);
         dn404Mirror = mirrorInstance;
 
-        // DN404 컨트랙트 초기화. 여기서는 초기 토큰 공급량과 소유자를 예시 값으로 사용함
-        uint96 initialTokenSupply = 0; // 초기 토큰 공급량을 가정한 값
-        address initialSupplyOwner = msg.sender; // 초기 공급량 소유자로 배포자를 사용
+        uint96 initialTokenSupply = 0; 
+        address initialSupplyOwner = msg.sender; 
 
         _initializeDN404(initialTokenSupply, initialSupplyOwner, address(mirrorInstance));
+
+        // Prefill all 10k bits in exists bitmap
+        _prefillExistsBitmap(10000);
     }
 
-    // Implements name from DN404.sol abstract contract
+    function _prefillExistsBitmap(uint256 totalTokens) internal {
+        for (uint256 i = 0; i < totalTokens; i += 256) {
+            // Set a batch of 256 tokens at a time to save on gas
+            _getDN404Storage().exists.setBatch(i, 256);
+        }
+    }
+
     function name() public view override returns (string memory) {
         return "ConvertERC721 to DN404 Token";
     }
 
-    // Implements symbol from DN404.sol abstract contract
     function symbol() public view override returns (string memory) {
         return "CETD";
     }
 
-    // `_tokenURI` 함수 구현
     function _tokenURI(uint256 tokenId) internal view override returns (string memory) {
-        // ERC721 토큰의 tokenURI를 직접 조회하여 반환
         return nftMetadata.tokenURI(tokenId);
     }
     
     function lockAndMint(uint256 tokenId) external {
-        require(!_isTokenLocked[tokenId], "Token is already locked");
+        require(!_isTokenLocked(tokenId), "Token is already locked");
         require(nftToken.ownerOf(tokenId) == msg.sender, "Caller must own the token");
 
-        // Lock the ERC721 token by transferring it to this contract
         nftToken.transferFrom(msg.sender, address(this), tokenId);
+        _mint(msg.sender, tokenId);
 
-        // Mint a DN404 token with the same token ID to the caller
-        _mint(msg.sender, tokenId); // Adjust this to match the DN404 minting functionality
-
-        _isTokenLocked[tokenId] = true;
+        _isTokenLockedBitmap.set(tokenId);
         emit TokenLocked(msg.sender, tokenId);
     }
 
     function burnAndUnlock(uint256 tokenId) external {
-        require(_isTokenLocked[tokenId], "Token is not locked or already unlocked");
+        require(_isTokenLocked(tokenId), "Token is not locked or already unlocked");
 
-        // Burn the DN404 token with the same token ID
-        _burn(msg.sender, tokenId); // Adjust this to match the DN404 burning functionality
-
-        // Unlock the ERC721 token by transferring it back to the caller
+        _burn(msg.sender, tokenId);
         nftToken.transferFrom(address(this), msg.sender, tokenId);
 
-        _isTokenLocked[tokenId] = false;
+        _isTokenLockedBitmap.unset(tokenId);
         emit TokenUnlocked(msg.sender, tokenId);
     }
 
     function isTokenLocked(uint256 tokenId) external view returns (bool) {
-        return _isTokenLocked[tokenId];
+        return _isTokenLockedBitmap.get(tokenId);
     }
 
-    // Override receive to enable contract to receive ether
     receive() external payable override {
-        // Optional: 여기에 클레이를 받았을 때 수행할 로직을 추가할 수 있습니다.
+        // Optional: Here, you can add logic when the contract receives ether.
+    }
+
+    // Utility function to check if a token is locked
+    function _isTokenLocked(uint256 tokenId) internal view returns (bool) {
+        return _isTokenLockedBitmap.get(tokenId);
     }
 }
